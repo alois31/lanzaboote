@@ -25,8 +25,9 @@ pub fn setup_generation_link(
     profiles_directory: &Path,
     version: u64,
 ) -> Result<PathBuf> {
-    let toplevel = setup_toplevel(tmpdir).context("Failed to setup toplevel")?;
-    setup_generation_link_from_toplevel(&toplevel, profiles_directory, version)
+    let kernel_version = "6.1.1";
+    let toplevel = setup_toplevel(tmpdir, kernel_version).context("Failed to setup toplevel")?;
+    setup_generation_link_from_toplevel(&toplevel, kernel_version, profiles_directory, version)
 }
 
 /// Create a mock generation link.
@@ -35,14 +36,16 @@ pub fn setup_generation_link(
 /// (mimicking /nix/var/nix/profiles). Returns the path to the generation link.
 pub fn setup_generation_link_from_toplevel(
     toplevel: &Path,
+    kernel_version: &str,
     profiles_directory: &Path,
     version: u64,
 ) -> Result<PathBuf> {
     let bootspec = json!({
         "org.nixos.bootspec.v1": {
           "init": format!("init-v{}", version),
-          "initrd": toplevel.join("initrd"),
-          "kernel": toplevel.join("kernel"),
+          // Normally, these are in the Nix store.
+          "initrd": toplevel.join(format!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-{kernel_version}/initrd")),
+          "kernel": toplevel.join(format!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-{kernel_version}/kernel")),
           "kernelParams": [
             "amd_iommu=on",
             "amd_iommu=pt",
@@ -77,19 +80,23 @@ pub fn setup_generation_link_from_toplevel(
 ///
 /// Accepts the temporary directory as a parameter so that the invoking function retains control of
 /// it (and when it goes out of scope).
-pub fn setup_toplevel(tmpdir: &Path) -> Result<PathBuf> {
+pub fn setup_toplevel(tmpdir: &Path, kernel_version: &str) -> Result<PathBuf> {
     // Generate a random toplevel name so that multiple toplevel paths can live alongside each
     // other in the same directory.
     let toplevel = tmpdir.join(format!("toplevel-{}", random_string(8)));
-    fs::create_dir(&toplevel)?;
+    let fake_store_path =
+        toplevel.join(format!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-{kernel_version}"));
+    fs::create_dir_all(&fake_store_path)?;
 
     let test_systemd = systemd_location_from_env()?;
     let test_systemd_stub = format!("{test_systemd}/lib/systemd/boot/efi/linuxx64.efi.stub");
 
-    let initrd_path = toplevel.join("initrd");
-    let kernel_path = toplevel.join("kernel");
+    let initrd_path = fake_store_path.join("initrd");
+    let kernel_path = fake_store_path.join("kernel");
     let nixos_version_path = toplevel.join("nixos-version");
-    let kernel_modules_path = toplevel.join("kernel-modules/lib/modules/6.1.1");
+    let kernel_modules_path = toplevel
+        .join("kernel-modules/lib/modules")
+        .join(kernel_version);
 
     // To simplify the test setup, we use the systemd stub for all PE binaries used by lanzatool.
     // Lanzatool doesn't care whether its actually a kernel or initrd but only whether it can

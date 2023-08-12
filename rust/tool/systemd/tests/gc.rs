@@ -29,17 +29,24 @@ fn keep_only_configured_number_of_generations() -> Result<()> {
     assert_eq!(stub_count(), 3, "Wrong number of stubs after installation");
     assert_eq!(
         kernel_and_initrd_count(),
-        6,
+        2,
         "Wrong number of kernels & initrds after installation"
     );
 
+    // Create a garbage kernel, which should be deleted.
+    fs::write(
+        esp_mountpoint.path().join("EFI/nixos/kernel-garbage.efi"),
+        "garbage",
+    )?;
+
     // Call `lanzatool install` again with a config limit of 2 and assert that one is deleted.
+    // In addition, the garbage kernel should be deleted as well.
     let output1 = common::lanzaboote_install(2, esp_mountpoint.path(), generation_links)?;
     assert!(output1.status.success());
     assert_eq!(stub_count(), 2, "Wrong number of stubs after gc.");
     assert_eq!(
         kernel_and_initrd_count(),
-        4,
+        2,
         "Wrong number of kernels & initrds after gc."
     );
 
