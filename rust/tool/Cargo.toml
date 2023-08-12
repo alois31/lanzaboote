@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.72"
+base64 = "0.21.2"
 clap = { version = "4.3.17", features = ["derive"] }
 goblin = "0.7.1"
 nix = { version = "0.26.2", default-features = false, features = [ "fs" ] }
