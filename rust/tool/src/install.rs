@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::prelude::PermissionsExt;
+use std::os::unix::prelude::{OsStrExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::string::ToString;
@@ -9,6 +9,7 @@ use std::string::ToString;
 use anyhow::{anyhow, Context, Result};
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use nix::unistd::sync;
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use crate::esp::EspPaths;
@@ -231,13 +232,26 @@ impl Installer {
             &self.esp_paths.esp,
         )
         .context("Failed to assemble lanzaboote image.")?;
+        let stub_inputs = [
+            // Generation numbers can be reused if the latest generation was deleted.
+            // To detect this, the stub path depends on the actual toplevel used.
+            ("toplevel", bootspec.toplevel.0.as_os_str().as_bytes()),
+            // If the key is rotated, the signed stubs must be re-generated.
+            // So we make their path depend on the public key used for signature.
+            ("public_key", &fs::read(&self.key_pair.public_key)?),
+        ];
+        let stub_input_hash =
+            URL_SAFE_NO_PAD.encode(Sha256::digest(serde_json::to_string(&stub_inputs).unwrap()));
         let stub_name = if let Some(specialisation_name) = generation.is_specialised() {
             PathBuf::from(format!(
-                "nixos-generation-{}-specialisation-{}.efi",
-                generation, specialisation_name
+                "nixos-generation-{}-specialisation-{}-{}.efi",
+                generation, specialisation_name, stub_input_hash
             ))
         } else {
-            PathBuf::from(format!("nixos-generation-{}.efi", generation))
+            PathBuf::from(format!(
+                "nixos-generation-{}-{}.efi",
+                generation, stub_input_hash
+            ))
         };
         let stub_target = self.esp_paths.linux.join(stub_name);
         self.gc_roots.extend([&stub_target]);
