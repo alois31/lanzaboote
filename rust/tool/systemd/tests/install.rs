@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
-use tempfile::{tempdir, TempDir};
+use tempfile::tempdir;
 
 mod common;
 
@@ -45,12 +43,16 @@ fn overwrite_unsigned_images() -> Result<()> {
     let esp = tempdir()?;
     let tmpdir = tempdir()?;
     let profiles = tempdir()?;
+    let kernel_version = "6.1.1";
+    let toplevel = common::setup_toplevel(tmpdir.path(), kernel_version)?;
 
-    let image1 = image_path(&esp, 1);
-    let image2 = image_path(&esp, 2);
+    let image1 = common::image_path(&esp, 1, &toplevel)?;
+    let image2 = common::image_path(&esp, 2, &toplevel)?;
 
-    let generation_link1 = common::setup_generation_link(tmpdir.path(), profiles.path(), 1)?;
-    let generation_link2 = common::setup_generation_link(tmpdir.path(), profiles.path(), 2)?;
+    let generation_link1 =
+        setup_generation_link_from_toplevel(&toplevel, kernel_version, profiles.path(), 1)?;
+    let generation_link2 =
+        setup_generation_link_from_toplevel(&toplevel, kernel_version, profiles.path(), 2)?;
     let generation_links = vec![generation_link1, generation_link2];
 
     let output1 = common::lanzaboote_install(0, esp.path(), generation_links.clone())?;
@@ -65,6 +67,37 @@ fn overwrite_unsigned_images() -> Result<()> {
 
     assert!(verify_signature(&image1)?);
     assert!(verify_signature(&image2)?);
+
+    Ok(())
+}
+
+#[test]
+fn detect_generation_number_reuse() -> Result<()> {
+    let esp = tempdir()?;
+    let tmpdir = tempdir()?;
+    let profiles = tempdir()?;
+    let kernel_version = "6.1.1";
+    let toplevel1 = common::setup_toplevel(tmpdir.path(), kernel_version)?;
+    let toplevel2 = common::setup_toplevel(tmpdir.path(), kernel_version)?;
+
+    let image1 = common::image_path(&esp, 1, &toplevel1)?;
+    // this deliberately gets the same number!
+    let image2 = common::image_path(&esp, 1, &toplevel2)?;
+
+    let generation_link1 =
+        setup_generation_link_from_toplevel(&toplevel1, kernel_version, profiles.path(), 1)?;
+    let output1 = common::lanzaboote_install(0, esp.path(), vec![generation_link1])?;
+    assert!(output1.status.success());
+    assert!(image1.exists());
+    assert!(!image2.exists());
+
+    std::fs::remove_dir_all(profiles.path().join("system-1-link"))?;
+    let generation_link2 =
+        setup_generation_link_from_toplevel(&toplevel2, kernel_version, profiles.path(), 1)?;
+    let output2 = common::lanzaboote_install(0, esp.path(), vec![generation_link2])?;
+    assert!(output2.status.success());
+    assert!(!image1.exists());
+    assert!(image2.exists());
 
     Ok(())
 }
@@ -100,9 +133,4 @@ fn content_addressing_works() -> Result<()> {
     assert_eq!(kernel_hash_source, kernel_hash);
 
     Ok(())
-}
-
-fn image_path(esp: &TempDir, version: u64) -> PathBuf {
-    esp.path()
-        .join(format!("EFI/Linux/nixos-generation-{version}.efi"))
 }
